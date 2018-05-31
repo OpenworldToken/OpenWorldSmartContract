@@ -1,1 +1,1 @@
-# OpenWorldSmartContract
+Open World (OPW), a smart contract platform on top of NEO’s blockchain, is designed to offer consumer grade fiat-pegged crypto-currencies leveraging the distributed ledger technology and smart contract and is committed to building up a decentralized, resilient, open and transparent system of price-stable crypto-currency. 
