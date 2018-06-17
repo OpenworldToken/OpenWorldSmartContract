@@ -28,11 +28,8 @@ namespace Neo.SmartContract
         private const ulong TOKEN_MAX_SUPPLY = 1000000000 * FACTOR;
         private const ulong TOTAL_AMOUNT = TOKEN_MAX_SUPPLY;
 
-        // Maximum number of OPW to be minted in sales
-        public const ulong TOKEN_MAX_CROWDSALE_SUPPLY = 250297600 * FACTOR;
-
         // Storage key for the current total supply
-        public const String TOKEN_TOTAL_SUPPLY_KEY = "total_supply";
+        public const String TOKEN_TOTAL_SUPPLY_KEY = "totalSupply";
 
         public static readonly string PREFIX_APPROVE = "a";
         public static readonly string PREFIX_BALANCE = "b";
@@ -190,8 +187,9 @@ namespace Neo.SmartContract
             BigInteger deployed = Storage.Get(Storage.CurrentContext, "deployed").AsBigInteger();
             if (deployed != 0) return false;
 
-            byte[] ownerKey = GetStorageKey(PREFIX_BALANCE, OWNER);
-            Storage.Put(Storage.CurrentContext, ownerKey, TOKEN_MAX_SUPPLY);
+            byte[] total_supply = Storage.Get(Storage.CurrentContext, "totalSupply");
+            Storage.Put(Storage.CurrentContext, TOKEN_TOTAL_SUPPLY_KEY, TOKEN_MAX_SUPPLY);
+            Transferred(null, OWNER, TOKEN_MAX_SUPPLY);
 
             Storage.Put(Storage.CurrentContext, "deployed", 1);
             return true;
