@@ -16,19 +16,21 @@ namespace Neo.SmartContract
         //超级管理员账户
         public static readonly byte[] OWNER = "AKzwJJ9fHfY4WQ8nKWCLRk6MscFiaBoZ6M".ToScriptHash();
 
-
         //因子
         public static byte Decimals() => 8;
         private const ulong FACTOR = 100000000;
-
 
         //NEO Asset
 
         private static readonly byte[] NEO_ASSET_ID = { 155, 124, 255, 218, 166, 116, 190, 174, 15, 147, 14, 190, 96, 133, 175, 144, 147, 229, 254, 86, 179, 74, 92, 34, 12, 205, 207, 110, 252, 51, 111, 197 };
 
         //总计数量
-        private const ulong OWNER_AMOUNT = 30785543 * FACTOR;
-        private const ulong TOTAL_AMOUNT = OWNER_AMOUNT;
+        private const ulong TOKEN_MAX_SUPPLY = 1000000000 * FACTOR;
+        private const ulong TOTAL_AMOUNT = TOKEN_MAX_SUPPLY;
+
+        // Maximum number of OPW to be minted in sales
+        public const ulong TOKEN_MAX_CROWDSALE_SUPPLY = 250297600 * FACTOR;
+
         // Storage key for the current total supply
         public const String TOKEN_TOTAL_SUPPLY_KEY = "total_supply";
 
@@ -57,7 +59,6 @@ namespace Neo.SmartContract
 
         [DisplayName("unlocked")]
         public static event Action<byte[], BigInteger, BigInteger> Unlocked;
-
      
         public static Object Main(string operation, params object[] args)
         {
@@ -134,6 +135,15 @@ namespace Neo.SmartContract
                     }
                 }
 
+                if (operation == "airdropTokens")
+                {
+
+                    if (args.Length == 2)
+                    {
+                        return AirdropTokens((byte[])args[0], (BigInteger)args[1]);
+                    }
+                }
+
                 if (operation == "lock")
                 {
                     if (args.Length != 4) return false;
@@ -181,7 +191,7 @@ namespace Neo.SmartContract
             if (deployed != 0) return false;
 
             byte[] ownerKey = GetStorageKey(PREFIX_BALANCE, OWNER);
-            Storage.Put(Storage.CurrentContext, ownerKey, OWNER_AMOUNT);
+            Storage.Put(Storage.CurrentContext, ownerKey, TOKEN_MAX_SUPPLY);
 
             Storage.Put(Storage.CurrentContext, "deployed", 1);
             return true;
@@ -384,6 +394,12 @@ namespace Neo.SmartContract
 
             BigInteger newAmount = TotalSupply() + amount;
 
+            // Check if not going over max supply
+            if (newAmount > TOKEN_MAX_SUPPLY)
+            {
+                return false;
+            }
+
             BigInteger currentBalance = BalanceOf(address);
 
             BigInteger newTotal = currentBalance + amount;
@@ -398,6 +414,7 @@ namespace Neo.SmartContract
 
             return true;
         }
+
 
         // Get smart contract script hash
         private static byte[] GetReceiver()
