@@ -1,501 +1,283 @@
 ﻿using Neo.SmartContract.Framework;
 using Neo.SmartContract.Framework.Services.Neo;
 using Neo.SmartContract.Framework.Services.System;
-using Helper = Neo.SmartContract.Framework.Helper;
 using System;
 using System.ComponentModel;
 using System.Numerics;
 
-namespace OpenWorldSmartContract
+namespace Neo.SmartContract
 {
-    public class OpenWorldSmartContract : SmartContract
+    public class OPWToken : Framework.SmartContract
     {
-        //NEO Asset
-        private static readonly byte[] neo_asset_id = { 155, 124, 255, 218, 166, 116, 190, 174, 15, 147, 14, 190, 96, 133, 175, 144, 147, 229, 254, 86, 179, 74, 92, 34, 12, 205, 207, 110, 252, 51, 111, 197 };
+        //Token Settings
+        public static string Name() => "Open World";
+        public static string Symbol() => "OPW";
 
+        //超级管理员账户
+        public static readonly byte[] OWNER = "AKzwJJ9fHfY4WQ8nKWCLRk6MscFiaBoZ6M".ToScriptHash();
+
+
+        //因子
+        public static byte Decimals() => 8;
+        private const ulong FACTOR = 100000000;
+
+
+        //NEO Asset
+
+        private static readonly byte[] NEO_ASSET_ID = { 155, 124, 255, 218, 166, 116, 190, 174, 15, 147, 14, 190, 96, 133, 175, 144, 147, 229, 254, 86, 179, 74, 92, 34, 12, 205, 207, 110, 252, 51, 111, 197 };
+
+        //总计数量
+        private const ulong OWNER_AMOUNT = 30785543 * FACTOR;
+        private const ulong TOTAL_AMOUNT = OWNER_AMOUNT;
+        // Storage key for the current total supply
+        public const String TOKEN_TOTAL_SUPPLY_KEY = "total_supply";
+
+        public static readonly string PREFIX_APPROVE = "a";
+        public static readonly string PREFIX_BALANCE = "b";
+        public static readonly string PREFIX_LOCK = "l";
+
+        public static readonly string PRIVATE_WHITELISTED_KEY = "pw";
+        public static readonly string WHITELISTED_KEY = "w";
+        public static readonly string BALANCE_KEY = "b";
+
+        [DisplayName("whitelistRegister")]
+        public static event Action<byte[]> OnWhitelistRegister;
+        
         [DisplayName("transfer")]
         public static event Action<byte[], byte[], BigInteger> Transferred;
 
+        [DisplayName("refund")]
+        public static event Action<byte[], BigInteger> Refund;
 
         [DisplayName("approve")]
         public static event Action<byte[], byte[], BigInteger> Approved;
 
-        //超级管理员账户
-        private static readonly byte[] _OwnerAccountScriptHash  = Helper.ToScriptHash("AKzwJJ9fHfY4WQ8nKWCLRk6MscFiaBoZ6M");
+        [DisplayName("locked")]
+        public static event Action<byte[], byte[], BigInteger, BigInteger> Locked;
 
-        //因子
-        private const ulong _Factor = 100000000; //decided by Decimals()
-
-        //总计数量
-        private const ulong _TotalAmount = 1000000000 * _Factor; // total token amount
-
-
-        private const string _TotalSupply = "totalSupply";
+        [DisplayName("unlocked")]
+        public static event Action<byte[], BigInteger, BigInteger> Unlocked;
 
      
-        //nep5 func
-        public static BigInteger TotalSupply()
+        public static Object Main(string operation, params object[] args)
         {
-             return Storage.Get(Storage.CurrentContext, _TotalSupply).AsBigInteger();
-        }
-        public static string Name()
-        {
-            return "Open World";
-        }
-        public static string Symbol()
-        {
-            return "OPW";
-        }
-       
-        public static byte Decimals()
-        {
-            return 8;
-        }
-
-        /// <summary>
-        ///  Get the balance of the address
-        /// </summary>
-        /// <param name="address">
-        ///  address
-        /// </param>
-        /// <returns>
-        ///   account balance
-        /// </returns>
-        public static BigInteger BalanceOf(byte[] address)
-        {
-            return Storage.Get(Storage.CurrentContext, address).AsBigInteger();
-        }
-
-        /// <summary>
-        ///   Transfer a token balance to another account.
-        /// </summary>
-        /// <param name="from">
-        ///   The contract invoker.
-        /// </param>
-        /// <param name="to">
-        ///   The account to transfer to.
-        /// </param>
-        /// <param name="value">
-        ///   The amount to transfer.
-        /// </param>
-        /// <returns>
-        ///   Transaction Successful?
-        /// </returns>
-        public static bool Transfer(byte[] from, byte[] to, BigInteger value)
-        {
-            if (value <= 0) return false;
-
-            if (from == to) return true;
-
-            //付款方
-            if (from.Length > 0)
+            if (Runtime.Trigger == TriggerType.Verification)
             {
-                BigInteger from_value = Storage.Get(Storage.CurrentContext, from).AsBigInteger();
-                if (from_value < value) return false;
-                if (from_value == value)
-                    Storage.Delete(Storage.CurrentContext, from);
-                else
-                    Storage.Put(Storage.CurrentContext, from, from_value - value);
-            }
-            //收款方
-            if (to.Length > 0)
-            {
-                BigInteger to_value = Storage.Get(Storage.CurrentContext, to).AsBigInteger();
-                Storage.Put(Storage.CurrentContext, to, to_value + value);
-            }
-            //保存交易信息
-            TransferInfo info = new TransferInfo();
-            info.from = from;
-            info.to = to;
-            info.value = value;
-
-            byte[] txinfo = Helper.Serialize(info);
-            //获取交易id
-            byte[] txid = ((Transaction)ExecutionEngine.ScriptContainer).Hash;
-            Storage.Put(Storage.CurrentContext, txid, txinfo);
-
-            //notify
-            Transferred(from, to, value);
-            return true;
-        }
-
-
-        /// <summary>
-        ///   This smart contract is designed to implement NEP-5
-        ///   Parameter List: 0710
-        ///   Return List: 05
-        /// </summary>
-        /// <param name="operation">
-        ///     The methos being invoked.
-        /// </param>
-        /// <param name="args">
-        ///     Optional input parameters used by NEP5 methods.
-        /// </param>
-        /// <returns>
-        ///     Return Object
-        /// </returns>
-        public static Object Main(string operation,object[] args)
-        {
-            //  var magicstr = "openworld";
-
-            if (Runtime.Trigger == TriggerType.Verification)//取钱才会涉及这里
-            {
-                Transaction tx = (Transaction)ExecutionEngine.ScriptContainer;
-                byte[] curhash = ExecutionEngine.ExecutingScriptHash;
-                TransactionInput[] inputs = tx.GetInputs();
-                TransactionOutput[] outputs = tx.GetOutputs();
-
-                //检查输入是不是有被标记过
-                for (var i = 0; i < inputs.Length; i++)
+                if (OWNER.Length == 20)
                 {
-                    byte[] coinid = inputs[i].PrevHash.Concat(new byte[] { 0, 0 });
-                    if (inputs[i].PrevIndex == 0)//如果utxo n为0 的话，是有可能是一个标记utxo的
-                    {
-                        byte[] target = Storage.Get(Storage.CurrentContext, coinid);
-                        if (target.Length > 0)
-                        {
-                            if (inputs.Length > 1 || outputs.Length != 1)//使用标记coin的时候只允许一个输入\一个输出
-                                return false;
-
-                            //如果只有一个输入，一个输出，并且目的转账地址就是授权地址
-                            //允许转账
-                            if (outputs[0].ScriptHash.AsBigInteger() == target.AsBigInteger())
-                                return true;
-                            else//否则不允许
-                                return false;
-                        }
-                    }
+                    return Runtime.CheckWitness(OWNER);
                 }
-                //走到这里没跳出，说明输入都没有被标记
-                TransactionOutput[] refs = tx.GetReferences();
-                BigInteger inputcount = 0;
-                for (var i = 0; i < refs.Length; i++)
+                else if (OWNER.Length == 33)
                 {
-                    if (refs[i].AssetId != neo_asset_id)
-                        return false;//不允许操作除gas以外的
-
-                    if (refs[i].ScriptHash.AsBigInteger() != curhash.AsBigInteger())
-                        return false;//不允许混入其它地址
-
-                    inputcount += refs[i].Value;
+                    // if param Owner is public key
+                    byte[] signature = operation.AsByteArray();
+                    return VerifySignature(signature, OWNER);
                 }
-                //检查有没有钱离开本合约
-                BigInteger outputcount = 0;
-                for (var i = 0; i < outputs.Length; i++)
-                {
-                    if (outputs[i].ScriptHash.AsBigInteger() != curhash.AsBigInteger())
-                    {
-                        return false;
-                    }
-                    outputcount += outputs[i].Value;
-                }
-                if (outputcount != inputcount)
-                    return false;
-                //没有资金离开本合约地址，允许
-                return true;
             }
             else if (Runtime.Trigger == TriggerType.Application)
             {
-                //this is in nep5
+                if (operation == "deploy") return Deploy();
                 if (operation == "totalSupply") return TotalSupply();
                 if (operation == "name") return Name();
                 if (operation == "symbol") return Symbol();
-                if (operation == "decimals") return Decimals();
-                if (operation == "balanceOf")
-                {
-                    if (args.Length != 1) return 0;
-                    byte[] account = (byte[])args[0];
-                    return BalanceOf(account);
-                }
-                if (operation == "deploy")
-                {
-                    return Deploy();
-                }
                 if (operation == "transfer")
                 {
                     if (args.Length != 3) return false;
                     byte[] from = (byte[])args[0];
                     byte[] to = (byte[])args[1];
                     BigInteger value = (BigInteger)args[2];
-
-                    if (from.Length == 0 || to.Length == 0) return false;
-
-                    if (from == to) return true;
-                    //没有from签名，不让转
-                    if (!Runtime.CheckWitness(from))
-                        return false;
-                    //如果有跳板调用，不让转
-                    if (ExecutionEngine.EntryScriptHash.AsBigInteger() != ExecutionEngine.CallingScriptHash.AsBigInteger())
-                        return false;
-
                     return Transfer(from, to, value);
                 }
-                //允许赋权操作的金额
-                if (operation == "allowance")
+                if (operation == "balanceOf")
                 {
-                    //args[0]发起人账户   args[1]被授权账户
-                    return Allowance((byte[])args[0], (byte[])args[1]);
+                    if (args.Length != 1) return 0;
+                    byte[] account = (byte[])args[0];
+                    return BalanceOf(account);
                 }
+                if (operation == "decimals") return Decimals();
                 if (operation == "approve")
                 {
-                    //args[0]发起人账户  args[1]被授权账户   args[2]被授权金额
-                    return Approve((byte[])args[0], (byte[])args[1], (BigInteger)args[2]);
+                    if (args.Length != 3) return false;
+                    byte[] owner = (byte[])args[0];
+                    byte[] spender = (byte[])args[1];
+                    BigInteger amount = (BigInteger)args[2];
+                    return Approve(owner, spender, amount);
+                }
+                if (operation == "allowance")
+                {
+                    if (args.Length != 2) return false;
+                    byte[] owner = (byte[])args[0];
+                    byte[] spender = (byte[])args[1];
+                    return Allowance(owner, spender);
                 }
                 if (operation == "transferFrom")
                 {
-                    //args[0]转账账户  args[1]被授权账户 args[2]被转账账户   args[3]被授权金额
-                    return TransferFrom((byte[])args[0], (byte[])args[1], (byte[])args[2], (BigInteger)args[3]);
-                }
-                //用NEO兑换OPW代币
-                if (operation == "exchange")
-                {
-                    return ExchangeTokens();
-
-                }
-                //赎回拥有的OPW,兑换成NEO
-                if (operation == "withdraw")
-                {
-                    return Withdraw((byte[])args[0],(BigInteger)args[1]);
-                }
-                //查询nep5交易信息
-                if (operation == "gettxinfo")
-                {
-                    if (args.Length != 1) return 0;
-                    byte[] txid = (byte[])args[0];
-                    return GetTxInfo(txid);
-                }
-                //销毁对应的nep5，兑换NEO
-                if (operation == "exchangeUtxo")
-                {
-                    if (args.Length != 1) return 0;
-                    byte[] who = (byte[])args[0];
-                    if (!Runtime.CheckWitness(who))
-                        return false;
-                    return RefundToken(who);
-                }
-                if (operation == "getUtxoTarget")
-                {
-                    if (args.Length != 1) return 0;
-                    byte[] hash = (byte[])args[0];
-                    return GetUtxoTarget(hash);
+                    if (args.Length != 4) return false;
+                    byte[] originator = (byte[])args[0];
+                    byte[] from = (byte[])args[1];
+                    byte[] to = (byte[])args[2];
+                    BigInteger amount = (BigInteger)args[3];
+                    return TransferFrom(originator, from, to, amount);
                 }
 
+                if (operation == "whitelistRegister")
+                {
+                    return WhitelistRegister(args);
+                }
 
+                if (operation == "isWhitelisted")
+                {
+
+                    if (args.Length == 1)
+                    {
+                        return IsWhitelisted((byte[])args[0]);
+                    }
+                }
+
+                if (operation == "lock")
+                {
+                    if (args.Length != 4) return false;
+                    byte[] from = (byte[])args[0];
+                    byte[] to = (byte[])args[1];
+                    BigInteger amount = (BigInteger)args[2];
+                    BigInteger lockTime = (BigInteger)args[3];
+                    return Lock(from, to, amount, lockTime);
+                }
+                if (operation == "unlock")
+                {
+                    if (args.Length != 2) return false;
+                    byte[] to = (byte[])args[0];
+                    BigInteger time = (BigInteger)args[1];
+                    return Unlock(to, time);
+                }
+                if (operation == "lockedBalance")
+                {
+                    if (args.Length != 2) return false;
+                    byte[] to = (byte[])args[0];
+                    BigInteger time = (BigInteger)args[1];
+                    return LockedBalance(to, time);
+                }
             }
+
+            byte[] sender = GetSender();
+            ulong contribute_value = GetContributeValue();
+            if (contribute_value > 0 && sender.Length != 0)
+            {
+                Refund(sender, contribute_value);
+            }
+
             return false;
         }
 
-        private static byte[] GetUtxoTarget(byte[] txid)
-        {
-            byte[] coinid = txid.Concat(new byte[] { 0, 0 });
-            byte[] target = Storage.Get(Storage.CurrentContext, coinid);
-            return target;
-        }
-
-        private static bool RefundToken(byte[] who)
-        {
-            Transaction tx = (Transaction)ExecutionEngine.ScriptContainer;
-            TransactionOutput[] outputs = tx.GetOutputs();
-            //退的不是NEO，不行
-            if (outputs[0].AssetId != neo_asset_id)
-                return false;
-            //不是转给自身，不行
-            if (outputs[0].ScriptHash != ExecutionEngine.ExecutingScriptHash)
-                return false;
-
-
-            //当前的交易已经名花有主了，不行
-            byte[] target = GetUtxoTarget(tx.Hash);
-            if (target.Length > 0)
-                return false;
-
-            //尝试销毁一定数量的金币
-            BigInteger count = outputs[0].Value;
-            bool b = Transfer(who, null, count);
-            if (!b)
-                return false;
-
-            //标记这个utxo归我所有
-            byte[] coinid = tx.Hash.Concat(new byte[] { 0, 0 });
-            Storage.Put(Storage.CurrentContext, coinid, who);
-
-            //改变总量
-            BigInteger total_supply = Storage.Get(Storage.CurrentContext, _TotalSupply).AsBigInteger();
-            total_supply -= count;
-            Storage.Put(Storage.CurrentContext, _TotalSupply, total_supply);
-            return true;
-        }
-
-        private static TransferInfo GetTxInfo(byte[] txid)
-        {
-            byte[] vs =  Storage.Get(Storage.CurrentContext, txid);
-            if (vs.Length == 0) return null;
-            return (TransferInfo)Helper.Deserialize(vs);
-        }
-
-        private static bool Withdraw(byte[] addr, BigInteger account)
-        {
-            if (!Runtime.CheckWitness(addr)) return false;
-            BigInteger current = Storage.Get(Storage.CurrentContext, addr).AsBigInteger();
-            if (account > current) return false;
-
-            if (account == current)
-            {
-                Storage.Delete(Storage.CurrentContext, addr);
-            }
-            Storage.Put(Storage.CurrentContext,addr, IntToBytes(current - account));
-            return true;
-        }
-
-        /// <summary>
-        ///   Deploy the sdt tokens to the _OwnerAccountScriptHash  account，only once
-        /// </summary>
-        /// <returns>
-        ///   Transaction Successful?
-        /// </returns>
+        // parameters initialization
         public static bool Deploy()
         {
-            if (!Runtime.CheckWitness(_OwnerAccountScriptHash )) return false;
-            byte[] total_supply = Storage.Get(Storage.CurrentContext, _TotalSupply);
-            if (total_supply.Length != 0) return false;
-            Storage.Put(Storage.CurrentContext, _OwnerAccountScriptHash , IntToBytes(_TotalAmount));
-            Storage.Put(Storage.CurrentContext, _TotalSupply, _TotalAmount);
-            Transferred(null, _OwnerAccountScriptHash , _TotalAmount);
+            if (!Helper.IsOwner())
+            {
+                return false;
+            }
+
+            BigInteger deployed = Storage.Get(Storage.CurrentContext, "deployed").AsBigInteger();
+            if (deployed != 0) return false;
+
+            byte[] ownerKey = GetStorageKey(PREFIX_BALANCE, OWNER);
+            Storage.Put(Storage.CurrentContext, ownerKey, OWNER_AMOUNT);
+
+            Storage.Put(Storage.CurrentContext, "deployed", 1);
             return true;
         }
 
-        /// <summary>
-        ///   Return the amount of the tokens that the spender could transfer from the owner acount
-        /// </summary>
-        /// <param name="owner">
-        ///   The account to invoke the Approve method
-        /// </param>
-        /// <param name="spender">
-        ///   The account to grant TransferFrom access to.
-        /// </param>
-        /// <returns>
-        ///   The amount to grant TransferFrom access for
-        /// </returns>
-        public static BigInteger Allowance(byte[] owner, byte[] spender)
+        // Current total supplied tokens.
+        public static BigInteger TotalSupply()
         {
-            return Storage.Get(Storage.CurrentContext, owner.Concat(spender)).AsBigInteger();
+            return Storage.Get(Storage.CurrentContext,TOKEN_TOTAL_SUPPLY_KEY).AsBigInteger();
         }
 
-        /// <summary>
-        ///   Approve another account to transfer amount tokens from the owner acount by transferForm
-        /// </summary>
-        /// <param name="owner">
-        ///   The account to invoke approve.
-        /// </param>
-        /// <param name="spender">
-        ///   The account to grant TransferFrom access to.
-        /// </param>
-        /// <param name="amount">
-        ///   The amount to grant TransferFrom access for.
-        /// </param>
-        /// <returns>
-        ///   Transaction Successful?
-        /// </returns>
-        public static bool Approve(byte[] owner, byte[] spender, BigInteger amount)
+        public static bool AddToTotalSupply(BigInteger amount)
         {
-            if (owner.Length != 20 || spender.Length != 20) return false;
+            BigInteger totalSupply = Storage.Get(Storage.CurrentContext, TOKEN_TOTAL_SUPPLY_KEY).AsBigInteger();
+
+            totalSupply = totalSupply + amount;
+
+            Storage.Put(Storage.CurrentContext, TOKEN_TOTAL_SUPPLY_KEY, totalSupply);
+
+            return true;
+        }
+
+        // Function is called when someone wants to transfer tokens.
+        public static bool Transfer(byte[] from, byte[] to, BigInteger value)
+        {
+            if (value <= 0) return false;
+            if (!Runtime.CheckWitness(from)) return false;
+            if (from == to) return true;
+
+            BigInteger fromValue = GetBalance(from);
+            if (fromValue < value) return false;
+            byte[] fromKey = GetStorageKey(PREFIX_BALANCE, from);
+            WorkingWithStorage(fromKey, fromValue, value);
+
+            BigInteger toValue = GetBalance(to);
+            byte[] toKey = GetStorageKey(PREFIX_BALANCE, to);
+            Storage.Put(Storage.CurrentContext, toKey, toValue + value);
+            Transferred(from, to, value);
+            return true;
+        }
+
+        // Transfer tokens on behalf of `from` to `to`, requires allowance
+        public static bool TransferFrom(byte[] originator, byte[] from, byte[] to, BigInteger value)
+        {
+            if (value <= 0) return false;
+            if (!Runtime.CheckWitness(originator)) return false;
+            byte[] allowanceKey = GetStorageKey(PREFIX_APPROVE, from, originator);
+            if (allowanceKey.Length != 41) return false;
+            BigInteger allowanceValue = Storage.Get(Storage.CurrentContext, allowanceKey).AsBigInteger();
+            if (Compare(allowanceValue, value) < 0) return false;
+
+            BigInteger fromValue = GetBalance(from);
+            if (Compare(fromValue, value) < 0) return false;
+
+            byte[] fromKey = GetStorageKey(PREFIX_BALANCE, from);
+            WorkingWithStorage(fromKey, fromValue, value);
+
+            BigInteger toValue = GetBalance(to);
+            byte[] toKey = GetStorageKey(PREFIX_BALANCE, to);
+            Storage.Put(Storage.CurrentContext, toKey, toValue + value);
+
+            WorkingWithStorage(allowanceKey, allowanceValue, value);
+
+            Transferred(from, to, value);
+            return true;
+        }
+
+        // This method overwrites the any value
+        public static bool Approve(byte[] owner, byte[] to, BigInteger value)
+        {
+            if (value <= 0) return false;
             if (!Runtime.CheckWitness(owner)) return false;
-            if (owner == spender) return true;
-            if (amount < 0) return false;
-            if (amount == 0)
-            {
-                Storage.Delete(Storage.CurrentContext, owner.Concat(spender));
-                Approved(owner, spender, amount);
-                return true;
-            }
-            Storage.Put(Storage.CurrentContext, owner.Concat(spender), amount);
-            Approved(owner, spender, amount);
+            byte[] approvalKey = GetStorageKey(PREFIX_APPROVE, owner, to);
+            if (approvalKey.Length != 41) return false;
+            Storage.Put(Storage.CurrentContext, approvalKey, value);
+            Approved(owner, to, value);
             return true;
         }
 
-        /// <summary>
-        ///   Transfer an amount from the owner account to the to acount if the spender has been approved to transfer the requested amount
-        /// </summary>
-        /// <param name="owner">
-        ///   The account to transfer a balance from.
-        /// </param>
-        /// <param name="spender">
-        ///   The contract invoker.
-        /// </param>
-        /// <param name="to">
-        ///   The account to transfer a balance to.
-        /// </param>
-        /// <param name="amount">
-        ///   The amount to transfer
-        /// </param>
-        /// <returns>
-        ///   Transaction successful?
-        /// </returns>
-        public static bool TransferFrom(byte[] owner, byte[] spender, byte[] to, BigInteger amount)
+        // Get the amount that `to` can send on behalf of `owner`
+        public static BigInteger Allowance(byte[] owner, byte[] to)
         {
-            if (owner.Length != 20 || spender.Length != 20 || to.Length != 20) return false;
-            if (!Runtime.CheckWitness(spender)) return false;
-            BigInteger allowance = Storage.Get(Storage.CurrentContext, owner.Concat(spender)).AsBigInteger();
-            BigInteger fromOrigBalance = Storage.Get(Storage.CurrentContext, owner).AsBigInteger();
-            BigInteger toOrigBalance = Storage.Get(Storage.CurrentContext, to).AsBigInteger();
-
-            if (amount >= 0 &&
-                allowance >= amount &&
-                fromOrigBalance >= amount)
-            {
-                if (allowance - amount == 0)
-                {
-                    Storage.Delete(Storage.CurrentContext, owner.Concat(spender));
-                }
-                else
-                {
-                    Storage.Put(Storage.CurrentContext, owner.Concat(spender), IntToBytes(allowance - amount));
-                }
-
-                if (fromOrigBalance - amount == 0)
-                {
-                    Storage.Delete(Storage.CurrentContext, owner);
-                }
-                else
-                {
-                    Storage.Put(Storage.CurrentContext, owner, IntToBytes(fromOrigBalance - amount));
-                }
-                Storage.Put(Storage.CurrentContext, to, IntToBytes(toOrigBalance + amount));
-                Transferred(owner, to, amount);
-                return true;
-            }
-            return false;
+            if (owner.Length != 20) return -1;
+            if (to.Length != 20) return -1;
+            byte[] allowanceKey = GetStorageKey(PREFIX_APPROVE, owner, to);
+            return Storage.Get(Storage.CurrentContext, allowanceKey).AsBigInteger();
         }
 
-        // 将转移的neo转化为等价的OPW代币，兑换比率1:10
-        public static bool ExchangeTokens()
+        // Get the balance of a address
+        public static BigInteger BalanceOf(byte[] address)
         {
-            byte[] sender = GetSender();
-            // contribute asset is not neo
-            if (sender.Length == 0)
-            {
-                return false;
-            }
-            ulong contribute_value = GetContributeValue();
-            ulong token = 0;
-            if (contribute_value == 0)
-            {
-                return false;
-            }
-            else
-            {
-                token = contribute_value * 10; //1:10的兑换比率
-            }
-            //改变总量
-            var total_supply = Storage.Get(Storage.CurrentContext, _TotalSupply).AsBigInteger();
-            total_supply += token;
-            Storage.Put(Storage.CurrentContext, _TotalSupply, total_supply);
-
-            //1:10的兑换比率
-            return Transfer(null,sender,token);
+            byte[] key = GetStorageKey(PREFIX_BALANCE, address);
+            return Storage.Get(Storage.CurrentContext, key).AsBigInteger();
         }
 
-        // check whether asset is neo and get sender script hash
+        // Check whether asset is neo and get sender script hash
         private static byte[] GetSender()
         {
             Transaction tx = (Transaction)ExecutionEngine.ScriptContainer;
@@ -503,54 +285,185 @@ namespace OpenWorldSmartContract
             // you can choice refund or not refund
             foreach (TransactionOutput output in reference)
             {
-                if (output.AssetId == neo_asset_id) return output.ScriptHash;
+                if (output.AssetId == NEO_ASSET_ID) return output.ScriptHash;
             }
-            return new byte[] { };
+
+            return new byte[0];
         }
 
-        // get smart contract script hash
+        // Send `amount` of tokens for `to` an address that are locked until `time`
+        public static bool Lock(byte[] from, byte[] to, BigInteger value, BigInteger lockTime)
+        {
+            if (value <= 0) return false;
+            if (to.Length != 20) return false;
+            if (from.Length != 20) return false;
+            if ((uint)lockTime <= Runtime.Time) return false;
+            if (!Runtime.CheckWitness(from)) return false;
+
+            BigInteger fromValue = GetBalance(from);
+            if (Compare(fromValue, value) < 0) return false;
+            byte[] fromKey = GetStorageKey(PREFIX_BALANCE, from);
+
+            WorkingWithStorage(fromKey, fromValue, value);
+
+            byte[] lockKey = GetStorageKey(PREFIX_LOCK, to, lockTime.ToByteArray());
+            BigInteger lockValue = Storage.Get(Storage.CurrentContext, lockKey).AsBigInteger();
+            Storage.Put(Storage.CurrentContext, lockKey, lockValue + value);
+
+            Locked(from, to, value, lockTime);
+            return true;
+        }
+
+        // Unlock all tokens locked for `to` at `time`
+        public static bool Unlock(byte[] to, BigInteger time)
+        {
+            if ((uint)time > Runtime.Time) return false;
+            if (to.Length != 20) return false;
+
+            byte[] lockKey = GetStorageKey(PREFIX_LOCK, to, time.ToByteArray());
+            BigInteger value = Storage.Get(Storage.CurrentContext, lockKey).AsBigInteger();
+
+            if (value == 0) return false;
+
+            BigInteger toValue = GetBalance(to);
+            byte[] toKey = GetStorageKey(PREFIX_BALANCE, to);
+            Storage.Put(Storage.CurrentContext, toKey, toValue + value);
+            Storage.Delete(Storage.CurrentContext, lockKey);
+
+            Unlocked(to, value, time);
+            return true;
+        }
+
+
+        public static int WhitelistRegister(params object[] args)
+        {
+
+
+            if (!Helper.IsOwner())
+            {
+                return 0;
+            }
+
+            int savedAddressesCount = 0;
+
+            foreach (byte[] address in args)
+            {
+                if (Helper.IsValidAddress(address))
+                {
+                    Storage.Put(Storage.CurrentContext, Helper.StorageKey(WHITELISTED_KEY, address), 1);
+
+                    OnWhitelistRegister(address);
+                    savedAddressesCount = savedAddressesCount + 1;
+                }
+            }
+
+            return savedAddressesCount;
+        }
+
+        public static bool IsWhitelisted(byte[] address)
+        {
+            return Storage.Get(Storage.CurrentContext, Helper.StorageKey(WHITELISTED_KEY, address)).AsBigInteger() == 1;
+        }
+
+        static bool AirdropTokens(byte[] address, BigInteger amount)
+        {
+            if (!Helper.IsOwner())
+            {
+                return false;
+            }
+
+            if (!Helper.IsValidAddress(address))
+            {
+                return false;
+            }
+
+            if (amount <= 0)
+            {
+                return false;
+            }
+
+            BigInteger newAmount = TotalSupply() + amount;
+
+            BigInteger currentBalance = BalanceOf(address);
+
+            BigInteger newTotal = currentBalance + amount;
+
+            // Update balance
+            Storage.Put(Storage.CurrentContext, Helper.StorageKey(BALANCE_KEY, address), newTotal);
+
+            // Update total supply
+            AddToTotalSupply(newTotal);
+
+            Transferred(null, address, amount);
+
+            return true;
+        }
+
+        // Get smart contract script hash
         private static byte[] GetReceiver()
         {
             return ExecutionEngine.ExecutingScriptHash;
         }
 
-        // get all you contribute neo amount
+        // Get all you contribute neo amount
         private static ulong GetContributeValue()
         {
             Transaction tx = (Transaction)ExecutionEngine.ScriptContainer;
             TransactionOutput[] outputs = tx.GetOutputs();
             ulong value = 0;
+
             // get the total amount of Neo
-            // 获取转入智能合约地址的Neo总量
             foreach (TransactionOutput output in outputs)
             {
-                if (output.ScriptHash == GetReceiver() && output.AssetId == neo_asset_id)
+                if (output.ScriptHash == GetReceiver() && output.AssetId == NEO_ASSET_ID)
                 {
                     value += (ulong)output.Value;
                 }
             }
+
             return value;
         }
 
-
-        private static byte[] IntToBytes(BigInteger value)
+        // Generate storage key using preffix
+        public static byte[] GetStorageKey(string prefix, params byte[][] args)
         {
-            byte[] buffer = value.ToByteArray();
-            return buffer;
+            byte[] prefixArray = prefix.AsByteArray();
+            byte[] key = prefixArray.Concat(args[0]);
+            for (int i = 1; i < args.Length; ++i)
+                key = key.Concat(args[i]);
+            return key;
         }
 
-
-        private static BigInteger BytesToInt(byte[] array)
+        // Get token balance for an address
+        public static BigInteger GetBalance(byte[] address)
         {
-            var buffer = new BigInteger(array);
-            return buffer;
+            byte[] key = GetStorageKey(PREFIX_BALANCE, address);
+            return new BigInteger(Storage.Get(Storage.CurrentContext, key));
         }
 
-        public class TransferInfo
+        // Substract or Delete info from storage
+        public static void WorkingWithStorage(byte[] key, BigInteger oldValue, BigInteger subValue)
         {
-            public byte[] from;
-            public byte[] to;
-            public BigInteger value;
+            if (oldValue == subValue)
+                Storage.Delete(Storage.CurrentContext, key);
+            else
+                Storage.Put(Storage.CurrentContext, key, oldValue - subValue);
         }
+
+        public static BigInteger LockedBalance(byte[] address, BigInteger time)
+        {
+            if (address.Length != 20) return 0;
+            byte[] lockKey = GetStorageKey(PREFIX_LOCK, address, time.ToByteArray());
+            return Storage.Get(Storage.CurrentContext, lockKey).AsBigInteger();
+        }
+
+        private static int Compare(BigInteger current, BigInteger other)
+        {
+            if (current == other) return 0;
+            if (current > other) return 1;
+            return -1;
+        }
+
+       
     }
 }
