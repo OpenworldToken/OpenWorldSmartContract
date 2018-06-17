@@ -25,8 +25,9 @@ namespace Neo.SmartContract
         private static readonly byte[] NEO_ASSET_ID = { 155, 124, 255, 218, 166, 116, 190, 174, 15, 147, 14, 190, 96, 133, 175, 144, 147, 229, 254, 86, 179, 74, 92, 34, 12, 205, 207, 110, 252, 51, 111, 197 };
 
         //总计数量
-        private const ulong TOKEN_MAX_SUPPLY = 1000000000 * FACTOR;
-        private const ulong TOTAL_AMOUNT = TOKEN_MAX_SUPPLY;
+        public const ulong TOKEN_MAX_SUPPLY = 1000000000 * FACTOR;
+        public const ulong TOTAL_AMOUNT = TOKEN_MAX_SUPPLY;
+        public const ulong TOKEN_MAX_CROWDSALE_SUPPLY = 205297600 * FACTOR;
 
         // Storage key for the current total supply
         public const String TOKEN_TOTAL_SUPPLY_KEY = "totalSupply";
@@ -189,7 +190,8 @@ namespace Neo.SmartContract
 
             byte[] total_supply = Storage.Get(Storage.CurrentContext, "totalSupply");
             Storage.Put(Storage.CurrentContext, TOKEN_TOTAL_SUPPLY_KEY, TOKEN_MAX_SUPPLY);
-            Transferred(null, OWNER, TOKEN_MAX_SUPPLY);
+
+            Transferred(null, OWNER, TOKEN_MAX_CROWDSALE_SUPPLY);
 
             Storage.Put(Storage.CurrentContext, "deployed", 1);
             return true;
